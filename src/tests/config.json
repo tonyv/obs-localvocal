@@ -12,5 +12,6 @@
     "whisper_sampling_method": 1,
     "enable_audio_chunks_callback": true,
     "temperature": 0.0,
-    "no_context": true
+    "no_context": true,
+    "aws_transcribe": true
 }

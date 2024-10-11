@@ -87,7 +87,8 @@ void obs_log(int log_level, const char *format, ...)
 transcription_filter_data *
 create_context(int sample_rate, int channels, const std::string &whisper_model_path,
 	       const std::string &silero_vad_model_file, const std::string &ct2ModelFolder,
-	       const whisper_sampling_strategy whisper_sampling_method = WHISPER_SAMPLING_GREEDY)
+	       const whisper_sampling_strategy whisper_sampling_method = WHISPER_SAMPLING_GREEDY,
+	       bool awsTranscribeEnabled = false)
 {
 	struct transcription_filter_data *gf = new transcription_filter_data();
 
@@ -191,7 +192,28 @@ create_context(int sample_rate, int channels, const std::string &whisper_model_p
 	gf->whisper_params.length_penalty = -1;
 	gf->active = true;
 
-	start_whisper_thread_with_path(gf, whisper_model_path, silero_vad_model_file.c_str());
+	// from config json
+	gf->aws_transcribe_enabled = awsTranscribeEnabled;
+
+	if (gf->aws_transcribe_enabled) {
+		// start the aws transcribe handler
+		gf->transcription_handler = new TranscriptionHandler(
+			gf, [gf](const std::string &type, const std::string &text,
+				 uint64_t start_timestamp, uint64_t end_timestamp) {
+				DetectionResultWithText result;
+				result.text = text;
+				result.result = (type == "partial")
+							? DetectionResult::DETECTION_RESULT_PARTIAL
+							: DetectionResult::DETECTION_RESULT_SPEECH;
+				result.start_timestamp_ms = start_timestamp;
+				result.end_timestamp_ms = end_timestamp;
+				set_text_callback(gf, result);
+			});
+		gf->transcription_handler->start();
+	} else {
+		start_whisper_thread_with_path(gf, whisper_model_path,
+					       silero_vad_model_file.c_str());
+	}
 
 	obs_log(gf->log_level, "context created");
 
@@ -404,6 +426,7 @@ int wmain(int argc, wchar_t *argv[])
 	std::string whisperLanguageStr = config["whisper_language"];
 	std::string ct2ModelFolderStr = config["ct2_model_folder"];
 	std::string logLevelStr = config["log_level"];
+	bool awsTranscribeEnabled = config["aws_transcribe"];
 	whisper_sampling_strategy whisper_sampling_method = config["whisper_sampling_method"];
 
 	std::cout << "LocalVocal Offline Test" << std::endl;
@@ -414,7 +437,7 @@ int wmain(int argc, wchar_t *argv[])
 		read_audio_file(filenameStr.c_str(), [&](int sample_rate, int channels) {
 			gf = create_context(sample_rate, channels, whisperModelPathStr,
 					    sileroVadModelFileStr, ct2ModelFolderStr,
-					    whisper_sampling_method);
+					    whisper_sampling_method, awsTranscribeEnabled);
 			if (sourceLanguageStr.empty() || targetLanguageStr.empty() ||
 			    sourceLanguageStr == "none" || targetLanguageStr == "none") {
 				obs_log(LOG_INFO,
