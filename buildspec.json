@@ -29,6 +29,14 @@
             "debugSymbols": {
                 "windows-x64": "fbddd1f659c360f2291911ac5709b67b6f8182e6bca519d24712e4f6fd3cc865"
             }
+        },
+        "boost": {
+            "version": "1.86.0",
+            "baseUrl": "https://boostorg.jfrog.io/artifactory/main/release",
+            "label": "Boost C++ Libraries",
+            "hashes": {
+                "windows-x64": "e6a8f5966619a87cda5b63b6ca98e2780c96a672358f94f7df6487a7838c7eb6"
+            }
         }
     },
     "platformConfig": {
