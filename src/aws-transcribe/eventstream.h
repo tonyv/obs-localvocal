@@ -21,7 +21,7 @@ EventData decode_event(const std::vector<uint8_t>& message);
 
 // Creates an audio event message
 //std::vector<uint8_t> create_audio_event(const std::vector<uint8_t>& payload);
-std::vector<uint8_t> create_audio_event(const std::vector<uint8_t>& payload);
+std::vector<uint8_t> create_audio_event(const std::vector<int16_t>& payload);
 
 // Generates headers for the audio event
 std::vector<uint8_t> get_headers(const std::string& headerName, const std::string& headerValue);

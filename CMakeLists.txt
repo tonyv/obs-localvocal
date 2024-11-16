@@ -14,6 +14,11 @@ include(helpers)
 
 add_library(${CMAKE_PROJECT_NAME} MODULE)
 
+find_package(ZLIB REQUIRED)
+if(ZLIB_FOUND)
+    include_directories(${ZLIB_INCLUDE_DIRS})
+endif()
+
 find_package(libobs REQUIRED)
 target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE OBS::libobs)
 
@@ -147,6 +152,7 @@ target_sources(
           src/ui/filter-replace-utils.cpp
           src/translation/translation-language-utils.cpp
           src/ui/filter-replace-dialog.cpp
+          src/aws-transcribe/eventstream.cpp
           src/aws-transcribe/websocket-client.cpp
           src/aws-transcribe/aws-transcribe.cpp
           src/aws-transcribe/presigned-url.cpp)

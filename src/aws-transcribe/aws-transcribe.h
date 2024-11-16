@@ -30,4 +30,7 @@ public:
 private:
 	class Impl;
 	std::unique_ptr<Impl> pimpl;
+
+	void start_reading();
+	std::vector<int16_t> encodePcmToByteBuffer(const std::vector<int16_t>& pcmData);
 };

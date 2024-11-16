@@ -66,33 +66,19 @@ int get_data_from_buf_and_resample(transcription_filter_data *gf,
 			circlebuf_pop_front(&gf->input_buffers[c], gf->copy_buffers[c],
 					    num_frames_from_infos * sizeof(float));
 		}
+
+		// Directly push the audio data to resampled buffer without resampling
+		circlebuf_push_back(&gf->resampled_buffer, gf->copy_buffers[0],
+				    num_frames_from_infos * sizeof(float));
+
+		obs_log(gf->log_level,
+			"copied: %d channels, %d frames, current size: %lu bytes",
+			(int)gf->channels, (int)num_frames_from_infos,
+			gf->resampled_buffer.size);
 	}
 
 	obs_log(gf->log_level, "found %d frames from info buffer.", num_frames_from_infos);
 	gf->last_num_frames = num_frames_from_infos;
-
-	{
-		// resample to 16kHz
-		float *resampled_16khz[MAX_PREPROC_CHANNELS];
-		uint32_t resampled_16khz_frames;
-		uint64_t ts_offset;
-		{
-			ProfileScope("resample");
-			audio_resampler_resample(gf->resampler_to_whisper,
-						 (uint8_t **)resampled_16khz,
-						 &resampled_16khz_frames, &ts_offset,
-						 (const uint8_t **)gf->copy_buffers,
-						 (uint32_t)num_frames_from_infos);
-		}
-
-		circlebuf_push_back(&gf->resampled_buffer, resampled_16khz[0],
-				    resampled_16khz_frames * sizeof(float));
-		obs_log(gf->log_level,
-			"resampled: %d channels, %d frames, %f ms, current size: %lu bytes",
-			(int)gf->channels, (int)resampled_16khz_frames,
-			(float)resampled_16khz_frames / WHISPER_SAMPLE_RATE * 1000.0f,
-			gf->resampled_buffer.size);
-	}
 
 	return 0;
 }

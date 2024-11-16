@@ -18,7 +18,11 @@ target_sources(
           ${CMAKE_SOURCE_DIR}/src/translation/language_codes.cpp
           ${CMAKE_SOURCE_DIR}/src/translation/translation.cpp
           ${CMAKE_SOURCE_DIR}/src/ui/filter-replace-utils.cpp
-          ${CMAKE_SOURCE_DIR}/src/translation/translation-language-utils.cpp)
+          ${CMAKE_SOURCE_DIR}/src/translation/translation-language-utils.cpp
+          ${CMAKE_SOURCE_DIR}/src/aws-transcribe/eventstream.cpp
+          ${CMAKE_SOURCE_DIR}/src/aws-transcribe/websocket-client.cpp
+          ${CMAKE_SOURCE_DIR}/src/aws-transcribe/aws-transcribe.cpp
+          ${CMAKE_SOURCE_DIR}/src/aws-transcribe/presigned-url.cpp)
 
 include(${CMAKE_SOURCE_DIR}/cmake/FindLibAvObs.cmake)
 find_libav(${TEST_EXEC_NAME})

@@ -171,6 +171,7 @@ std::string AWSTranscribePresignedURL::CreateCanonicalQueryString(
     const std::string& dateTimeString,
     const std::string& credentialScope,
     const std::string& languageCode = "en-US",
+	//const std::string& languageCode = "ko-KR",
     const std::string& mediaEncoding = "pcm",
     const std::string& sampleRate = "8000",
 	const std::string& accessKey = ""

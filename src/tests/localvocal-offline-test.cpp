@@ -21,6 +21,7 @@
 #include "audio-file-utils.h"
 #include "translation/language_codes.h"
 #include "ui/filter-replace-utils.h"
+#include "aws-transcribe/aws-transcribe.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -197,6 +198,7 @@ create_context(int sample_rate, int channels, const std::string &whisper_model_p
 
 	if (gf->aws_transcribe_enabled) {
 		// start the aws transcribe handler
+		std::cout << "AWS Transcribe enabled" << std::endl;
 		gf->transcription_handler = new TranscriptionHandler(
 			gf, [gf](const std::string &type, const std::string &text,
 				 uint64_t start_timestamp, uint64_t end_timestamp) {
@@ -209,6 +211,7 @@ create_context(int sample_rate, int channels, const std::string &whisper_model_p
 				result.end_timestamp_ms = end_timestamp;
 				set_text_callback(gf, result);
 			});
+		std::cout << "Starting AWS Transcribe handler" << std::endl;
 		gf->transcription_handler->start();
 	} else {
 		start_whisper_thread_with_path(gf, whisper_model_path,
@@ -427,6 +430,8 @@ int wmain(int argc, wchar_t *argv[])
 	std::string ct2ModelFolderStr = config["ct2_model_folder"];
 	std::string logLevelStr = config["log_level"];
 	bool awsTranscribeEnabled = config["aws_transcribe"];
+
+
 	whisper_sampling_strategy whisper_sampling_method = config["whisper_sampling_method"];
 
 	std::cout << "LocalVocal Offline Test" << std::endl;
@@ -475,6 +480,8 @@ int wmain(int argc, wchar_t *argv[])
 				gf->filter_words_replace = deserialize_filter_words_replace(
 					config["filter_words_replace"]);
 			}
+						std::cout << "Reading audio file" << std::endl;
+
 			// set log level
 			if (logLevelStr == "debug") {
 				gf->log_level = LOG_DEBUG;
@@ -528,6 +535,8 @@ int wmain(int argc, wchar_t *argv[])
 		auto start_time_time = std::chrono::system_clock::now();
 		uint64_t window_number = 0;
 		while (true) {
+			//std::cout << "Filling up the whsper buffer" << std::endl;
+
 			// check if there are enough frames left in the audio buffer
 			if ((frames_count + frames) > (audio[0].size() / frame_size_bytes)) {
 				// only take the remaining frames

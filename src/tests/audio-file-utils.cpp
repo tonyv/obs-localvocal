@@ -4,7 +4,9 @@
 
 #include <obs-module.h>
 
+#include <fstream>
 #include <vector>
+#include <cstdint>
 #include <functional>
 
 #if defined(_WIN32) || defined(__APPLE__)
@@ -22,106 +24,59 @@ extern "C" {
 std::vector<std::vector<uint8_t>>
 read_audio_file(const char *filename, std::function<void(int, int)> initialization_callback)
 {
-	av_log_set_level(AV_LOG_QUIET);
+    std::ifstream file(filename, std::ios::binary);
+    if (!file.is_open()) {
+        obs_log(LOG_ERROR, "Could not open file: %s", filename);
+        return {};
+    }
 
-	obs_log(LOG_INFO, "Reading audio file %s", filename);
+    // Get file size
+    file.seekg(0, std::ios::end);
+    size_t file_size = file.tellg();
+    file.seekg(0, std::ios::beg);
 
-	AVFormatContext *formatContext = nullptr;
-	int ret = avformat_open_input(&formatContext, filename, nullptr, nullptr);
-	if (ret != 0) {
-		char errbuf[AV_ERROR_MAX_STRING_SIZE];
-		av_make_error_string(errbuf, AV_ERROR_MAX_STRING_SIZE, ret);
-		obs_log(LOG_ERROR, "Error opening file: %s", errbuf);
-		return {};
-	}
+    // Ensure file size is even (for 16-bit samples)
+    file_size = (file_size / 2) * 2;
 
-	if (avformat_find_stream_info(formatContext, nullptr) < 0) {
-		obs_log(LOG_ERROR, "Error finding stream information");
-		return {};
-	}
+    // Assume stereo
+    const int num_channels = 2;
+    const int sample_rate = 8000;
+    
+    // Call initialization callback
+    initialization_callback(sample_rate, num_channels);
 
-	int audioStreamIndex = -1;
-	for (unsigned int i = 0; i < formatContext->nb_streams; i++) {
-		if (formatContext->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
-			audioStreamIndex = i;
-			break;
-		}
-	}
+    // Read the entire file into a temporary buffer
+    std::vector<int16_t> temp_buffer(file_size / sizeof(int16_t));
+    file.read(reinterpret_cast<char*>(temp_buffer.data()), file_size);
 
-	if (audioStreamIndex == -1) {
-		obs_log(LOG_ERROR, "No audio stream found");
-		return {};
-	}
+    if (file.fail() && !file.eof()) {
+        obs_log(LOG_ERROR, "Failed to read from file: %s", std::strerror(errno));
+        return {};
+    }
 
-	// print information about the file
-	av_dump_format(formatContext, 0, filename, 0);
+    std::streamsize bytes_read = file.gcount();
 
-	// if the sample format is not float, return
-	if (formatContext->streams[audioStreamIndex]->codecpar->format != AV_SAMPLE_FMT_FLTP) {
-		obs_log(LOG_ERROR,
-			"Sample format is not float (it is %s). Encode the audio file with float planar sample format."
-			" For example, use the command 'ffmpeg -i input.mp3 -f f32le -acodec pcm_f32le output.f32le'",
-			"convert the audio file to float format.",
-			av_get_sample_fmt_name(
-				(AVSampleFormat)formatContext->streams[audioStreamIndex]
-					->codecpar->format));
-		return {};
-	}
+    // Create output buffers for each channel
+    std::vector<std::vector<uint8_t>> buffer(num_channels);
+    size_t samples_per_channel = bytes_read / (sizeof(int16_t) * num_channels);
+    
+    for (int channel = 0; channel < num_channels; channel++) {
+        buffer[channel].reserve(samples_per_channel * 2); // 2 bytes per sample
+    }
 
-	initialization_callback(formatContext->streams[audioStreamIndex]->codecpar->sample_rate,
-				formatContext->streams[audioStreamIndex]->codecpar->channels);
+    // Process samples
+    for (size_t i = 0; i < bytes_read / sizeof(int16_t); i += num_channels) {
+        for (int channel = 0; channel < num_channels; channel++) {
+            int16_t sample = temp_buffer[i + channel];
 
-	AVCodecParameters *codecParams = formatContext->streams[audioStreamIndex]->codecpar;
-	const AVCodec *codec = avcodec_find_decoder(codecParams->codec_id);
-	if (!codec) {
-		obs_log(LOG_ERROR, "Decoder not found");
-		return {};
-	}
+            // Little-endian byte order
+            buffer[channel].push_back(static_cast<uint8_t>(sample & 0xFF));
+            buffer[channel].push_back(static_cast<uint8_t>((sample >> 8) & 0xFF));
+        }
+    }
 
-	AVCodecContext *codecContext = avcodec_alloc_context3(codec);
-	if (!codecContext) {
-		obs_log(LOG_ERROR, "Failed to allocate codec context");
-		return {};
-	}
-
-	if (avcodec_parameters_to_context(codecContext, codecParams) < 0) {
-		obs_log(LOG_ERROR, "Failed to copy codec parameters to codec context");
-		return {};
-	}
-
-	if (avcodec_open2(codecContext, codec, nullptr) < 0) {
-		obs_log(LOG_ERROR, "Failed to open codec");
-		return {};
-	}
-
-	AVFrame *frame = av_frame_alloc();
-	AVPacket packet;
-
-	std::vector<std::vector<uint8_t>> buffer(
-		formatContext->streams[audioStreamIndex]->codecpar->channels);
-
-	while (av_read_frame(formatContext, &packet) >= 0) {
-		if (packet.stream_index == audioStreamIndex) {
-			if (avcodec_send_packet(codecContext, &packet) == 0) {
-				while (avcodec_receive_frame(codecContext, frame) == 0) {
-					// push data to the buffer
-					for (int j = 0; j < codecContext->channels; j++) {
-						buffer[j].insert(buffer[j].end(), frame->data[j],
-								 frame->data[j] +
-									 frame->nb_samples *
-										 sizeof(float));
-					}
-				}
-			}
-		}
-		av_packet_unref(&packet);
-	}
-
-	av_frame_free(&frame);
-	avcodec_free_context(&codecContext);
-	avformat_close_input(&formatContext);
-
-	return buffer;
+    file.close();
+    return buffer;
 }
 
 void write_audio_wav_file(const std::string &filename, const float *pcm32f_data,

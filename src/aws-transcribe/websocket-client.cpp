@@ -25,15 +25,13 @@ WebSocketClient::WebSocketClient(net::io_context& ioc, ssl::context& ctx,
     , port_(port)
     , target_(target)
 {
-    // Initialize the WebSocketClient object here
-    // For example:
-    // - Set any default options or configurations for the WebSocket stream
-    // - Prepare the SSL context (if using SSL)
-    // - Initialize any other member variables
+
 }
 
 void WebSocketClient::run()
 {
+    std::cout << "Starting Transcribe" << std::endl;
+    std::cout << host_ << std::endl;
     resolver_.async_resolve(
         host_,
         port_,
@@ -42,8 +40,17 @@ void WebSocketClient::run()
             shared_from_this()));
 }
 
+void WebSocketClient::verify_connection() {
+    std::cout << "Connection state:"
+                << "\n  Is open: " << ws_.is_open()
+                << "\n  Got upgrade: " << ws_.got_binary()
+                << "\n  Ready: " << connection_ready_
+                << std::endl;
+}
+
 void WebSocketClient::on_resolve(beast::error_code ec, tcp::resolver::results_type results)
 {
+    std::cout << "Resolving connection" << std::endl;
     if(ec)
         return fail(ec, "resolve");
     if(!SSL_set_tlsext_host_name(ws_.next_layer().native_handle(), host_.c_str()))
@@ -66,11 +73,15 @@ void WebSocketClient::on_connect(beast::error_code ec, tcp::resolver::results_ty
             shared_from_this()));
 }
 
+bool WebSocketClient::is_connected() {
+    return ws_.is_open();
+}
+
 void WebSocketClient::on_ssl_handshake(beast::error_code ec)
 {
     if(ec)
         return fail(ec, "ssl_handshake");
-    //std::cout << "SSL Handshake successful" << std::endl;
+    std::cout << "SSL Handshake successful" << std::endl;
     beast::get_lowest_layer(ws_).expires_never();
     ws_.set_option(websocket::stream_base::timeout::suggested(beast::role_type::client));
     ws_.set_option(websocket::stream_base::decorator(
@@ -81,7 +92,6 @@ void WebSocketClient::on_ssl_handshake(beast::error_code ec)
                     " websocket-client-async");
             req.set(http::field::connection, "Upgrade");
             req.set(http::field::upgrade, "websocket");
-            //req.set(http::field::origin, "ec2-44-203-201-70.compute-1.amazonaws.com");
             req.set(http::field::origin, "localhost");
             req.set(http::field::sec_websocket_version, "13");
 
@@ -98,42 +108,80 @@ void WebSocketClient::on_handshake(beast::error_code ec)
 {
     if(ec)
         return fail(ec, "handshake");
+    connection_ready_ = true;
     std::cout << "WebSocket connection established" << std::endl;
-    //send();
-    //receive();
 }
 
 void WebSocketClient::send_next_chunk(std::vector<int16_t> audio_chunk)
 {
+    if (!ws_.is_open()) {
+        std::cerr << "WebSocket is not open!" << std::endl;
+        return;
+    }
+    
+    if (!connection_ready_) {
+        std::cerr << "Connection not ready yet!" << std::endl;
+        return;
+    }
+
+    std::lock_guard<std::mutex> lock(write_mutex_);
+
+    if (write_in_progress_) {
+        std::cerr << "Write operation already in progress!" << std::endl;
+        return;
+    }
+
+    if (audio_chunk.empty()) {
+        std::cout << "Audio chunk is empty" << std::endl;
+        return;
+    }
+    
+    verify_connection();
+
+    std::cout << "Attempting to send chunk of size: " << audio_chunk.size() << std::endl;
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
-
-    //std::vector<unsigned char> audio_chunk = read_audio_chunk(wav_file, chunk_size);
-
-    //if (!audio_chunk.empty()) {
     std::vector<uint8_t> audio_event = create_audio_event(audio_chunk);
 
-    ws_.binary(true);
-    ws_.async_write(
-        net::buffer(audio_event),
-        beast::bind_front_handler(
-            &WebSocketClient::on_write,
-            shared_from_this()));
-    //} else {
-    //    std::cout << "Audio chunk is empty" << std::endl;
-    //}
+    try {
+        ws_.binary(true);
+        //current_write_buffer_ = std::make_shared<std::vector<uint8_t>>(std::move(audio_event));
+
+        ws_.async_write(
+            net::buffer(audio_event),
+            beast::bind_front_handler(
+                &WebSocketClient::on_write,
+                shared_from_this()));
+        /*
+        ws_.async_write(
+            net::buffer(*current_write_buffer_),
+            [self = shared_from_this(), buf = current_write_buffer_]
+            (beast::error_code ec, std::size_t bytes_transferred) {
+                self->on_write(ec, bytes_transferred);
+            });
+        */
+        write_in_progress_ = true;
+        std::cout << "async_write initiated" << std::endl;
+    } catch (const std::exception& e) {
+        write_in_progress_ = false;
+        std::cerr << "Exception in send_next_chunk: " << e.what() << std::endl;
+    }
+
 }
 
 void WebSocketClient::on_write(beast::error_code ec, std::size_t bytes_transferred)
 {
+    write_in_progress_ = false; 
     if (ec) {
+        std::cout << "Error sending message:" << ec.message() << std::endl;
         return fail(ec, "write");
+    } else {
+        std::cout << "Sent " << bytes_transferred << " bytes" << std::endl;
     }
-
-    send_next_chunk();
 }
 
 void WebSocketClient::receive()
 {
+    std::cout << "Receiving data" << std::endl;
     ws_.async_read(
         buffer_,
         beast::bind_front_handler(
@@ -141,8 +189,10 @@ void WebSocketClient::receive()
             shared_from_this()));
 }
 
+
 void WebSocketClient::on_read(beast::error_code ec, std::size_t bytes_transferred)
 {
+    std::cout << "On read ";
     if(ec)
         return fail(ec, "read");
 
@@ -150,16 +200,18 @@ void WebSocketClient::on_read(beast::error_code ec, std::size_t bytes_transferre
                                         boost::asio::buffers_end(buffer_.data()));
     // Decode the event
     auto [header, payload] = decode_event(message_bytes);
+    std::cout << "Decoding event" << std::endl;
+
     if (header[":message-type"] == "event") {
-        //std::cout << "Results: " << payload["Transcript"] << std::endl;
         if (!payload["Transcript"]["Results"].empty()) {
             std::cout << "Transcript: " << payload["Transcript"]["Results"][0]["Alternatives"][0]["Transcript"] << std::endl;
         }
     } else if (header[":message-type"] == "exception") {
         std::cerr << "Exception: " << payload["Message"] << std::endl;
+    } else {
+        std::cout << "Received nothing" << std::endl;
     }
     buffer_.consume(buffer_.size());
-    receive();
 }
 
 void WebSocketClient::on_close(beast::error_code ec)
